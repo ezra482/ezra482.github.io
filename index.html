@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>迷宫大逃脱（健康版）</title>
+<style>
+:root{
+  --bg:#0f1724;--panel:#0b1220;--accent:#06b6d4;
+  --wall:#111827;--player:#2563eb;--goal:#10b981;
+}
+html,body{height:100%;margin:0;font-family:system-ui,Segoe UI,Roboto,Arial;}
+body{
+  background: radial-gradient(circle at 10% 10%, rgba(6,182,212,0.08), transparent 10%),
+              linear-gradient(180deg,var(--bg),#071020);
+  color:#e6eef6;display:flex;align-items:center;justify-content:center;
+}
+.container{
+  width:min(920px,95vw);background:rgba(255,255,255,0.03);
+  border-radius:14px;padding:18px;box-shadow:0 10px 30px rgba(2,6,23,0.6);
+  display:flex;gap:18px;align-items:flex-start;
+}
+canvas{background:linear-gradient(180deg,#eff6ff05,#fff1 0%);border-radius:8px;}
+button{
+  background:var(--panel);border:1px solid rgba(255,255,255,0.04);
+  color:#dceffc;padding:8px 12px;border-radius:8px;cursor:pointer;font-weight:600;
+}
+button.ghost{background:transparent;border:1px dashed rgba(255,255,255,0.06)}
+#startScreen, #winOverlay, #timeLimit {
+  position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+  background:rgba(2,6,23,0.7);z-index:10;text-align:center;
+}
+.dialog{
+  background:#04202b;padding:22px;border-radius:12px;max-width:520px;
+}
+.dialog h2{color:var(--goal)}
+#startScreen h1{font-size:2em;color:var(--accent)}
+#startBtn{margin-top:18px;padding:10px 22px;background:var(--accent);
+  color:#04202b;font-weight:bold;border:none;border-radius:8px;cursor:pointer;}
+#musicToggle{margin-left:10px;font-size:12px;cursor:pointer;color:#a0c9e2;}
+.firework{
+  position:absolute;width:6px;height:6px;border-radius:50%;
+  background:#fff;pointer-events:none;animation:fly 1s ease-out forwards;
+}
+@keyframes fly{
+  to{transform:translate(var(--x),var(--y));opacity:0;}
+}
+</style>
+</head>
+<body>
+
+<!-- 🎮 开始界面 -->
+<div id="startScreen">
+  <div class="dialog">
+    <h1>迷宫大逃脱（健康版）</h1>
+    <p>
+      用方向键或 <b>WASD</b> 控制蓝色小圆点，找到绿色出口即可通关。<br>
+      游戏时间限制为 <b>30分钟</b>，之后请休息一下哦！💤
+    </p>
+    <button id="startBtn">开始游戏 🎮</button>
+    <div id="musicToggle">🔇 点击打开音乐</div>
+  </div>
+</div>
+
+<!-- 主体 -->
+<div id="game" class="container" style="display:none">
+  <canvas id="maze" width="640" height="640"></canvas>
+  <div>
+    <h2>迷宫大逃脱</h2>
+    <p id="status">状态：就绪</p>
+    <button id="restart">重新开始</button>
+    <button id="giveup" style="background:#ef4444;color:white">退出</button>
+  </div>
+</div>
+
+<!-- 通关界面 -->
+<div id="winOverlay" style="display:none">
+  <div class="dialog">
+    <h2>🎉 恭喜你通关！</h2>
+    <p>你成功走出迷宫！</p>
+    <button id="playAgain">再玩一次</button>
+  </div>
+</div>
+
+<!-- 时间限制界面 -->
+<div id="timeLimit" style="display:none">
+  <div class="dialog">
+    <h2>⏰ 时间到！</h2>
+    <p>你今天的30分钟游戏时间已用完，请明天再来。</p>
+  </div>
+</div>
+
+<!-- 背景音乐 -->
+<audio id="bgm" loop preload="auto">
+  <source src="https://cdn.pixabay.com/audio/2023/06/26/audio_9fdb4c49a5.mp3" type="audio/mpeg">
+</audio>
+
+<script>
+// ---- 防沉迷检查 ----
+const key = "mazePlayDate";
+const today = new Date().toDateString();
+if (localStorage.getItem(key) === today) {
+  document.getElementById("timeLimit").style.display = "flex";
+} else {
+  // 可玩
+  document.getElementById("startScreen").style.display = "flex";
+}
+
+// ---- 游戏逻辑 ----
+const MAP = [
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+  [1,0,0,0,1,0,0,0,0,0,1,0,0,0,0,1],
+  [1,0,1,0,1,0,1,1,1,0,1,0,1,1,0,1],
+  [1,0,1,0,0,0,0,0,1,0,0,0,1,0,0,1],
+  [1,0,1,1,1,1,1,0,1,1,1,0,1,0,1,1],
+  [1,0,0,0,0,0,1,0,0,0,1,0,1,0,0,1],
+  [1,1,1,1,1,0,1,1,1,0,1,0,1,1,0,1],
+  [1,0,0,0,1,0,0,0,1,0,0,0,0,0,0,1],
+  [1,0,1,0,1,1,1,0,1,1,1,1,1,1,0,1],
+  [1,0,1,0,0,0,1,0,0,0,0,0,0,1,0,1],
+  [1,0,1,1,1,0,1,1,1,1,1,1,0,1,0,1],
+  [1,0,0,0,1,0,0,0,0,0,0,1,0,1,0,1],
+  [1,1,1,0,1,1,1,1,1,1,0,1,0,1,0,1],
+  [1,0,0,0,0,0,0,0,0,1,0,0,0,0,0,1],
+  [1,0,1,1,1,1,1,1,0,1,1,1,1,1,0,1],
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+];
+let start={x:1,y:1}, goal={x:14,y:13}, player={x:1,y:1};
+const canvas=document.getElementById("maze"), ctx=canvas.getContext("2d");
+const cols=MAP[0].length, rows=MAP.length, cell=Math.floor(canvas.width/cols);
+const status=document.getElementById("status");
+const winOverlay=document.getElementById("winOverlay");
+const bgm=document.getElementById("bgm");
+let timer;
+
+// 绘制
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  for(let y=0;y<rows;y++)for(let x=0;x<cols;x++){
+    if(MAP[y][x]===1){ctx.fillStyle="#0b1220";ctx.fillRect(x*cell,y*cell,cell,cell);}
+  }
+  ctx.fillStyle='rgba(16,185,129,0.95)';ctx.fillRect(goal.x*cell+6,goal.y*cell+6,cell-12,cell-12);
+  ctx.beginPath();ctx.fillStyle='rgba(37,99,235,0.95)';
+  ctx.arc(player.x*cell+cell/2,player.y*cell+cell/2,cell*0.3,0,Math.PI*2);ctx.fill();
+}
+function canMove(nx,ny){return MAP[ny]&&MAP[ny][nx]===0;}
+function moveTo(nx,ny){if(canMove(nx,ny)){player.x=nx;player.y=ny;draw();checkWin();}}
+function checkWin(){
+  if(player.x===goal.x&&player.y===goal.y){
+    status.textContent="状态：通关！";
+    winOverlay.style.display="flex";
+    createFireworks();
+  }
+}
+
+// 键盘控制
+window.addEventListener("keydown",e=>{
+  const k=e.key.toLowerCase();let nx=player.x,ny=player.y;
+  if(k==="arrowup"||k==="w")ny--;else if(k==="arrowdown"||k==="s")ny++;
+  else if(k==="arrowleft"||k==="a")nx--;else if(k==="arrowright"||k==="d")nx++;
+  moveTo(nx,ny);
+});
+
+// 控件
+document.getElementById("restart").onclick=()=>{player={x:1,y:1};draw();};
+document.getElementById("giveup").onclick=()=>{window.location.reload();};
+document.getElementById("playAgain").onclick=()=>{winOverlay.style.display="none";player={x:1,y:1};draw();};
+
+// ---- 开始游戏 ----
+document.getElementById("startBtn").onclick=()=>{
+  document.getElementById("startScreen").style.display="none";
+  document.getElementById("game").style.display="flex";
+  draw();
+  startTimer();
+};
+
+// ---- 音乐控制 ----
+let musicOn=false;
+document.getElementById("musicToggle").onclick=()=>{
+  musicOn=!musicOn;
+  if(musicOn){bgm.play();document.getElementById("musicToggle").textContent="🎵 音乐已开启";}
+  else{bgm.pause();document.getElementById("musicToggle").textContent="🔇 点击打开音乐";}
+};
+
+// ---- 防沉迷计时 ----
+function startTimer(){
+  let startTime=Date.now();
+  timer=setInterval(()=>{
+    const elapsed=(Date.now()-startTime)/1000;
+    if(elapsed>=1800){ // 30分钟
+      clearInterval(timer);
+      localStorage.setItem(key,today);
+      document.getElementById("timeLimit").style.display="flex";
+      document.getElementById("game").style.display="none";
+    }
+  },1000);
+}
+
+// ---- 烟花动画 ----
+function createFireworks(){
+  for(let i=0;i<50;i++){
+    const f=document.createElement("div");
+    f.className="firework";
+    f.style.left="50%";f.style.top="50%";
+    f.style.background=`hsl(${Math.random()*360},100%,70%)`;
+    f.style.setProperty("--x",`${(Math.random()-0.5)*400}px`);
+    f.style.setProperty("--y",`${(Math.random()-0.5)*400}px`);
+    document.body.appendChild(f);
+    setTimeout(()=>f.remove(),1000);
+  }
+}
+</script>
+</body>
+</html>
